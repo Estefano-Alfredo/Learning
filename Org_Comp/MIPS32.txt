@@ -1,0 +1,450 @@
+.data
+    # ----------------------------------------
+    # Seção de Dados
+    # ----------------------------------------
+    prompt_msg: .asciiz "Digite a quantidade de frames: "
+    error_msg: .asciiz "Erro ao abrir o arquivo!\n"
+    output_filename: .asciiz "output.pgm"
+    
+    # Strings para a construcao do nome do arquivo
+    filename_base: .asciiz "frame_("
+    filename_ext: .asciiz ").pgm"
+    filename_buffer: .space 30       
+    
+    # Variaveis de controle
+    fd: .word 0                     
+    .align 2
+    height: .word 0
+    width: .word 0
+    
+    # Ponteiros para os arrays alocados dinamicamente
+    arrayBuffer: .word 0        # Array acumulador (4 bytes por pixel)
+    tempBuffer: .word 0         # Array temporario para o frame atual (1 byte por pixel)
+    outputBuffer: .word 0       # Array para a imagem de saida (1 byte por pixel)
+    
+    # Strings para o cabecalho PGM
+    p5_string: .asciiz "P5\n"
+    space_string: .asciiz " "
+    newline_string: .asciiz "\n"
+    max_value_string: .asciiz "255\n"
+
+.text
+    # ----------------------------------------
+    # Seção de Texto (Código Principal)
+    # ----------------------------------------
+    .globl main
+main:
+    # 1. Solicita e lê o número de frames do usuário
+    li $v0, 4                
+    la $a0, prompt_msg       
+    syscall
+    
+    li $v0, 5                
+    syscall
+    move $s0, $v0            # $s0 = total de frames
+    
+    # 2. Abre o PRIMEIRO arquivo para obter as dimensoes
+    li $s1, 1                # Inicia o contador de frames em 1
+    la $a0, filename_buffer
+    la $a1, filename_base
+    la $a2, filename_ext
+    move $a3, $s1            # Usa o frame 1 para a primeira alocacao
+    jal build_filename
+    
+    li $v0, 13
+    la $a0, filename_buffer  
+    li $a1, 0                
+    syscall
+    sw $v0, fd               
+    bltz $v0, file_error
+    
+    # 3. Lê o cabeçalho e obtém as dimensoes
+    lw $a0, fd
+    jal read_pgm_header      
+    sw $v0, width
+    sw $v1, height
+    
+    li $v0, 16
+    lw $a0, fd
+    syscall
+    
+    # 4. Aloca memória para os arrays
+    lw $t0, width
+    lw $t1, height
+    mul $t2, $t0, $t1        # $t2 = total de pixels
+    
+    # Aloca array acumulador (4 bytes por pixel)
+    sll $t3, $t2, 2          # $t3 = total de bytes
+    li $v0, 9                
+    move $a0, $t3            
+    syscall                  
+    sw $v0, arrayBuffer      # Salva o ponteiro para o array acumulador
+    
+    # Aloca array temporario (1 byte por pixel)
+    li $v0, 9
+    move $a0, $t2
+    syscall
+    sw $v0, tempBuffer       # Salva o ponteiro para o array temporario
+
+    # 5. Loop principal para processar cada frame
+    li $s1, 1                # Reinicia o contador de frames
+    
+main_loop:
+    bgt $s1, $s0, end_processing  # Se o contador for maior que o total, encerra
+
+    # Constrói o nome do arquivo dinamicamente
+    la $a0, filename_buffer  
+    la $a1, filename_base    
+    la $a2, filename_ext     
+    move $a3, $s1            
+    jal build_filename       
+
+    # Abre o arquivo novamente
+    li $v0, 13
+    la $a0, filename_buffer  
+    li $a1, 0                
+    syscall
+    sw $v0, fd               
+    bltz $v0, file_error
+    
+    # Lê o cabeçalho (apenas para mover o ponteiro do arquivo)
+    lw $a0, fd
+    jal read_pgm_header
+    
+    # Lê os dados da imagem para o buffer temporário
+    li $v0, 14
+    lw $a0, fd
+    lw $a1, tempBuffer       # Endereço do buffer temporário
+    move $a2, $t2            # Número de bytes a ler (total de pixels)
+    syscall
+
+    # 6. Loop interno para somar os pixels
+    lw $s2, tempBuffer       # $s2 = ponteiro para o buffer temporario
+    lw $s3, arrayBuffer      # $s3 = ponteiro para o array acumulador
+    li $t0, 0                # Indice do pixel (começa em 0)
+
+sum_pixels_loop:
+    beq $t0, $t2, end_sum_loop  # Se o indice for igual ao total de pixels, encerra o loop
+
+    # Carrega 1 byte (pixel) do buffer temporario
+    lb $t1, 0($s2)              
+
+    # Calcula o endereco no array acumulador
+    sll $t4, $t0, 2             # Indice * 4 para o array de words
+    add $t5, $s3, $t4           
+
+    # Carrega 1 word (a soma atual)
+    lw $t6, 0($t5)              
+
+    # Soma e armazena o resultado
+    add $t6, $t6, $t1           
+    sw $t6, 0($t5)              
+
+    # Incrementa e repete
+    addi $s2, $s2, 1            # Incrementa ponteiro do buffer temporario
+    addi $t0, $t0, 1            # Incrementa o indice
+    j sum_pixels_loop
+    
+end_sum_loop:
+    li $v0, 16
+    lw $a0, fd
+    syscall
+    
+    addi $s1, $s1, 1         
+    j main_loop
+    
+end_processing:
+    # 7. Alocar buffer para a imagem final (1 byte por pixel)
+    lw $t0, width
+    lw $t1, height
+    mul $t2, $t0, $t1        
+    
+    li $v0, 9                
+    move $a0, $t2            
+    syscall                  
+    sw $v0, outputBuffer     # $s2 = endereco do buffer de saida
+
+    # 8. Loop para calcular a média e salvar em um novo buffer de bytes
+    lw $s2, outputBuffer     # $s2 = ponteiro de saida
+    lw $s3, arrayBuffer      # $s3 = ponteiro para o array acumulador
+    li $t0, 0                # $t0 = indice
+    
+calculate_average_loop:
+    beq $t0, $t2, end_average_loop # Se o indice for igual ao total, encerra
+
+    # Calcula o endereco no array acumulador
+    sll $t4, $t0, 2              
+    add $t5, $s3, $t4            
+    
+    # Carrega o valor e divide pela quantidade de frames
+    lw $t6, 0($t5)               
+    div $t6, $s0                 
+    mflo $t6                     
+    
+    # Armazena o byte no buffer de saida
+    sb $t6, 0($s2)               
+    
+    addi $s2, $s2, 1
+    addi $t0, $t0, 1
+    j calculate_average_loop
+    
+end_average_loop:
+    # 9. Criar e abrir o arquivo de saida
+    li $v0, 13
+    la $a0, output_filename
+    li $a1, 1                
+    li $a2, 0666             
+    syscall
+    move $s4, $v0            
+
+    # 10. Escrever o cabecalho
+    move $a0, $s4            
+    lw $a1, width            
+    lw $a2, height           
+    jal write_pgm_header
+    
+    # 11. Escrever os dados dos pixels
+    lw $t0, width
+    lw $t1, height
+    mul $t2, $t0, $t1
+    li $v0, 15
+    move $a0, $s4            
+    lw $a1, outputBuffer      
+    move $a2, $t2
+    syscall
+
+    # 12. Fechar o arquivo e terminar o programa
+    li $v0, 16
+    move $a0, $s4
+    syscall
+    
+    li $v0, 10
+    syscall
+
+file_error:
+    li $v0, 4
+    la $a0, error_msg       
+    syscall
+    j end_processing
+
+# ----------------------------------------
+# Sub-rotina: build_filename
+# ----------------------------------------
+# Constrói o nome completo do arquivo.
+# Entrada: $a0=buffer, $a1=base, $a2=ext, $a3=numero
+build_filename:
+    addi $sp, $sp, -4      
+    sw $ra, 0($sp)          
+
+    move $t0, $a0           
+    move $t1, $a1           
+copy_base_loop:
+    lb $t2, 0($t1)
+    sb $t2, 0($t0)
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    bnez $t2, copy_base_loop
+    addi $t0, $t0, -1      
+
+    move $a0, $t0          
+    move $a1, $a3           
+    jal int_to_ascii
+    move $t0, $v0           
+
+    move $t1, $a2           
+copy_ext_loop:
+    lb $t2, 0($t1)
+    sb $t2, 0($t0)
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    bnez $t2, copy_ext_loop
+
+    lw $ra, 0($sp)         
+    addi $sp, $sp, 4       
+    jr $ra
+
+# ----------------------------------------
+# Sub-rotina: int_to_ascii
+# ----------------------------------------
+# Converte um inteiro em string ASCII e armazena em um buffer.
+# Entrada: $a0 = endereco do buffer, $a1 = inteiro
+# Saida: $v0 = endereco do final da string
+int_to_ascii:
+    addi $sp, $sp, -32      # Aloca um buffer de 32 bytes para a string
+    sw $ra, 28($sp)
+    sw $s0, 24($sp)         # Salva registradores
+    sw $s1, 20($sp)
+    
+    li $s0, 0               # $s0 = indice do buffer
+    li $t0, 10              # Divisor
+
+    bnez $a1, not_zero      # Se o numero for zero, vai para a secao is_zero
+
+is_zero:
+    li $t1, 48              # ASCII de '0'
+    sb $t1, 0($sp)          # Armazena no inicio do buffer
+    li $s0, 1               # Total de 1 digito
+    j reverse_string
+
+not_zero:
+    div_loop:
+        div $a1, $t0        # Divide o numero por 10
+        mflo $a1            # Quociente em $a1
+        mfhi $t1            # Resto em $t1 (o digito)
+        addi $t1, $t1, 48   # Converte o digito para ASCII
+
+        add $t2, $sp, $s0   # Calcula o endereco do byte a ser escrito
+        sb $t1, 0($t2)      # Salva o digito no buffer
+        addi $s0, $s0, 1    # Incrementa o indice do buffer
+
+        bgtz $a1, div_loop
+
+reverse_string:
+    # Inverte a string no proprio buffer
+    li $t0, 0               # Indice do inicio
+    sub $t1, $s0, 1         # Indice do final
+
+reverse_loop:
+    bge $t0, $t1, end_reverse # Se inicio >= final, encerra
+
+    add $t2, $sp, $t0       # Endereco do byte inicial
+    add $t3, $sp, $t1       # Endereco do byte final
+
+    lb $t4, 0($t2)          # Carrega o byte inicial
+    lb $t5, 0($t3)          # Carrega o byte final
+
+    sb $t5, 0($t2)          # Troca os bytes
+    sb $t4, 0($t3)
+
+    addi $t0, $t0, 1        # Incrementa o inicio
+    addi $t1, $t1, -1       # Decrementa o final
+    j reverse_loop
+
+end_reverse:
+    add $v0, $sp, $s0       # Retorna o endereco do final da string
+    
+    lw $ra, 28($sp)
+    lw $s0, 24($sp)
+    lw $s1, 20($sp)
+    addi $sp, $sp, 32       # Desaloca espaco da stack
+    jr $ra
+
+# ----------------------------------------
+# Sub-rotina: read_pgm_header
+# ----------------------------------------
+# Lê o cabeçalho de um arquivo PGM P5 e retorna as dimensoes.
+# Entrada: $a0 = descritor de arquivo
+# Saida: $v0 = largura, $v1 = altura
+read_pgm_header:
+    addi $sp, $sp, -4       
+    sw $ra, 0($sp)          
+    
+    li $v0, 14              
+    addi $a1, $sp, 4        
+    li $a2, 3               
+    syscall
+    
+read_comment:
+    li $v0, 14              
+    addi $a1, $sp, 4
+    li $a2, 1
+    syscall
+    
+    lb $t0, 0($a1)
+    bne $t0, '#', end_read_comment
+
+    read_comment_line:
+        li $v0, 14              
+        addi $a1, $sp, 4
+        li $a2, 1
+        syscall
+        lb $t0, 0($a1)
+        bne $t0, '\n', read_comment_line
+    j read_comment
+
+end_read_comment:
+    li $v0, 5               
+    syscall
+    move $v0, $v0           
+
+    li $v0, 5               
+    syscall
+    move $v1, $v0           
+
+    li $v0, 5               
+    syscall
+
+    lw $ra, 0($sp)          
+    addi $sp, $sp, 4        
+    jr $ra
+
+# ----------------------------------------
+# Sub-rotina: write_pgm_header
+# ----------------------------------------
+# Escreve o cabecalho PGM para um arquivo de saida.
+# Entrada: $a0=descritor de arquivo, $a1=largura, $a2=altura
+write_pgm_header:
+    addi $sp, $sp, -32      # Aloca espaco para buffer de string e regs
+    sw $ra, 28($sp)
+    sw $s0, 24($sp)         # Descritor do arquivo
+    sw $s1, 20($sp)         # Largura
+    sw $s2, 16($sp)         # Altura
+    
+    move $s0, $a0
+    move $s1, $a1
+    move $s2, $a2
+    
+    # Escreve "P5\n"
+    li $v0, 15
+    move $a0, $s0
+    la $a1, p5_string        
+    li $a2, 3                
+    syscall
+    
+    # Converte e escreve a largura
+    move $a0, $s1
+    la $a1, 0($sp)
+    jal int_to_ascii
+    li $v0, 15
+    move $a0, $s0
+    move $a1, $sp
+    sub $a2, $v0, $sp        
+    syscall
+    
+    # Escreve espaco
+    li $v0, 15
+    move $a0, $s0
+    la $a1, space_string
+    li $a2, 1
+    syscall
+    
+    # Converte e escreve a altura
+    move $a0, $s2
+    la $a1, 0($sp)
+    jal int_to_ascii
+    li $v0, 15
+    move $a0, $s0
+    move $a1, $sp
+    sub $a2, $v0, $sp
+    syscall
+    
+    # Escreve newline
+    li $v0, 15
+    move $a0, $s0
+    la $a1, newline_string
+    li $a2, 1
+    syscall
+
+    # Escreve "255\n"
+    li $v0, 15
+    move $a0, $s0
+    la $a1, max_value_string
+    li $a2, 4
+    syscall
+
+    lw $ra, 28($sp)
+    lw $s0, 24($sp)
+    lw $s1, 20($sp)
+    lw $s2, 16($sp)
+    addi $sp, $sp, 32
+    jr $ra

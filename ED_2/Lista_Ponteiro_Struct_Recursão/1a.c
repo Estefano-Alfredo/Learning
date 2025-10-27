@@ -17,7 +17,6 @@ typedef struct Tno
 int main()
 {
     Tno *raiz = NULL;
-    Tno **r = &raiz;
     
     //No chave = 7
     raiz = malloc(sizeof(Tno)); //Não utilizarei cast em nenhum malloc, o tipo da variável funciona de forma semelhante (segundo o professor).

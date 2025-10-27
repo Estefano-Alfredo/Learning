@@ -6,7 +6,7 @@
 //imprime o endereço do nó raiz 7, através de raiz.
 printf("%p", raiz);
 
-//outra forma (descobri isso estrudando para a lista).
+//outra forma (descobri isso estudando para a lista).
 #include <stddef.h> //para habilitar size_t e offsetof.
 
 //na main, assumindo que OS forneceu memória para raiz = malloc e que raiz é um Tno padrão de ABP passado em sala.
