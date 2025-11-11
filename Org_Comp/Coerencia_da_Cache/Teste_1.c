@@ -33,7 +33,7 @@ int main()
         {
             matrizCor[i*TAM+j].r = 255;
             matrizCor[i*TAM+j].g = 255;
-            matrizCor[i*TAM+j].b = 255;            
+            matrizCor[i*TAM+j].b = 255;
         }
     }
 

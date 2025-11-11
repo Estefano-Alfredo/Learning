@@ -7,7 +7,7 @@
 int FB(TNoAVL *p)
 {
     if(!p) return 0;
-    return p->fb;
+    return 1;
 }
 
  //Assumindo que o ponteiro de ponteiro é de uma AVL
@@ -29,10 +29,10 @@ int rotacaoDir(TNoAVL **pp)
      * FB do novo filho direito (ex raiz passado para a função) da nova raiz da sub árvore (ex filho esquerdo da antiga raiz)
      * O filho esquerdo da nova raiz não é alterado na rotação direita
      */
-    (*pp)->dir->fb = FB((*pp)->dir->esq->fb) + FB((*pp)->dir->dir->fb);
+    (*pp)->dir->fb = FB((*pp)->dir->esq) + FB((*pp)->dir->dir);
     
     //atualizando FB da nova raiz
-    (*pp)->fb = FB((*pp)->esq->fb) + FB((*pp)->dir->fb);
+    (*pp)->fb = FB((*pp)->esq) + FB((*pp)->dir);
 
     //retorna o novo fator de balancemanto da nova raiz
     return (*pp)->fb;
