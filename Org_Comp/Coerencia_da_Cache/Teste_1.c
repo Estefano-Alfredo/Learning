@@ -6,7 +6,7 @@ typedef struct cor
 {
     unsigned int r, g, b;
 } cor;
-#define TAM 20000
+#define TAM 25000
 
 int main()
 {
@@ -17,11 +17,27 @@ int main()
     
     //Variáveis de dados
     int i, j;
-    cor *matrizCor = (cor *)malloc(TAM*TAM*sizeof(cor));
+    cor **matrizCor = (cor **)malloc(TAM*sizeof(cor*));
     if(matrizCor == NULL) //verificando alocação dinâmica
     {
         printf("Falha na alocação da matriz");
         return 1;
+    }
+    for(i=0; i<TAM; i++)
+    {
+        matrizCor[i] = (cor *)malloc(TAM*sizeof(cor));
+        if(matrizCor[i] == NULL) //verificando alocação dinâmica
+        {
+            printf("Falha na alocação da matriz");
+            i=0;
+            while (matrizCor[i])
+            {
+                free(matrizCor[i]);
+                i++;
+            }
+            free(matrizCor);
+            return 1;
+        }
     }
 
     //Preenchendo matriz e verificando tempo total de operação:
@@ -31,9 +47,7 @@ int main()
     {
         for (j = 0; j < TAM; j++)
         {
-            matrizCor[i*TAM+j].r = 255;
-            matrizCor[i*TAM+j].g = 255;
-            matrizCor[i*TAM+j].b = 255;
+            matrizCor[i][j].r = matrizCor[i][j].r + matrizCor[i][j].g + matrizCor[i][j].b;
         }
     }
 
@@ -59,6 +73,10 @@ int main()
     tempo = (tf-ti)/1000; //convertido em milisegundos
     printf("%.3f\n", tempo);
 
+    for(i=0; i<TAM; i++)
+    {
+        free(matrizCor[i]);
+    }
     free(matrizCor);
     return 0;
 }
